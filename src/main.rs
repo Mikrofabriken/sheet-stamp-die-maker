@@ -99,9 +99,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             positive_form.put_pixel(positive_x, positive_y, Luma([positive_pixel]));
         }
     }
-    DynamicImage::from(negative_form)
-        .fliph()
-        .save_with_format("../paradise-rd-negative.png", image::ImageFormat::Png)?;
+    let negative_form = DynamicImage::from(negative_form).fliph();
+    negative_form.save_with_format("../paradise-rd-negative.png", image::ImageFormat::Png)?;
+    let mut positive_form = DynamicImage::from(positive_form);
+    positive_form.invert();
     positive_form.save_with_format("../paradise-rd-positive.png", image::ImageFormat::Png)?;
 
     Ok(())
