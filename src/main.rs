@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use image::io::Reader as ImageReader;
-use image::{ImageBuffer, Luma};
+use image::{DynamicImage, ImageBuffer, Luma};
 
 const BLACK: u16 = 0;
 
@@ -43,7 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             negative_form.put_pixel(output_x, output_y, Luma([output_color]));
         }
     }
-    negative_form.save_with_format("../paradise-rd-negative.png", image::ImageFormat::Png)?;
 
     let mut positive_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
 
@@ -62,7 +61,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start_x = positive_x.saturating_sub(SHEET_THICKNESS_PIXELS);
             let end_x = positive_x.saturating_add(SHEET_THICKNESS_PIXELS).min(width);
             let start_y = positive_y.saturating_sub(SHEET_THICKNESS_PIXELS);
-            let end_y = positive_y.saturating_add(SHEET_THICKNESS_PIXELS).min(height);
+            let end_y = positive_y
+                .saturating_add(SHEET_THICKNESS_PIXELS)
+                .min(height);
 
             let mut positive_z_mm = 0.0;
             for negative_y in start_y..end_y {
@@ -71,7 +72,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         x: negative_x,
                         y: negative_y,
                     };
-                    let xy_distance_mm = distance_pixels(positive_point, negative_point) / PIXELS_PER_MM;
+                    let xy_distance_mm =
+                        distance_pixels(positive_point, negative_point) / PIXELS_PER_MM;
                     if xy_distance_mm > SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM {
                         continue;
                     }
@@ -80,7 +82,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         * PUNCH_OUT_THICKNESS_MM;
 
                     let hypotenuse_mm = SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM;
-                    let required_z_diff_mm = ((hypotenuse_mm * hypotenuse_mm) - (xy_distance_mm * xy_distance_mm)).sqrt();
+                    let required_z_diff_mm = ((hypotenuse_mm * hypotenuse_mm)
+                        - (xy_distance_mm * xy_distance_mm))
+                        .sqrt();
                     let required_z = negative_z_mm + required_z_diff_mm;
                     if required_z > positive_z_mm {
                         positive_z_mm = required_z;
@@ -90,10 +94,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             positive_z_mm -= SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM;
             assert!(positive_z_mm >= 0.0);
             assert!(positive_z_mm <= PUNCH_OUT_THICKNESS_MM);
-            let positive_pixel = ((positive_z_mm / PUNCH_OUT_THICKNESS_MM) * u16::MAX as f32) as u16;
+            let positive_pixel =
+                ((positive_z_mm / PUNCH_OUT_THICKNESS_MM) * u16::MAX as f32) as u16;
             positive_form.put_pixel(positive_x, positive_y, Luma([positive_pixel]));
         }
     }
+    DynamicImage::from(negative_form)
+        .fliph()
+        .save_with_format("../paradise-rd-negative.png", image::ImageFormat::Png)?;
     positive_form.save_with_format("../paradise-rd-positive.png", image::ImageFormat::Png)?;
 
     Ok(())
