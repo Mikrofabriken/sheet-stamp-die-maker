@@ -55,10 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 x: output_x,
                 y: output_y,
             };
-            let output_color = if let Some(distance_to_black_pixels) =
+            let output_color = if let Some(distance_to_black_mm) =
                 closest_black_pixel(&luma_img, output_point, args.fade_distance)
             {
-                let distance_to_black_mm = distance_to_black_pixels / PIXELS_PER_MM;
                 fade_fn(distance_to_black_mm, args.fade_distance)
             } else {
                 u16::MAX
@@ -95,8 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         x: negative_x,
                         y: negative_y,
                     };
-                    let xy_distance_mm =
-                        distance_pixels(positive_point, negative_point) / PIXELS_PER_MM;
+                    let xy_distance_mm = distance_mm(positive_point, negative_point);
                     if xy_distance_mm > SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM {
                         continue;
                     }
@@ -130,31 +128,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Returns the distance from (x, y) to the closest pixel that is black, in `image`. Only searches the `max_distance` closest pixels
+/// Returns the distance (in mm) from `point` to the closest pixel that is black, in `image`. Only searches the `max_distance` closest pixels
 fn closest_black_pixel(
     image: &ImageBuffer<Luma<u16>, Vec<u16>>,
     point: PixelPosition,
     max_distance_mm: f32,
 ) -> Option<f32> {
-    let start_x = point
-        .x
-        .saturating_sub((max_distance_mm * PIXELS_PER_MM).floor() as u32);
+    let max_distance_pixels = (max_distance_mm * PIXELS_PER_MM).floor() as u32;
+    let start_x = point.x.saturating_sub(max_distance_pixels);
     let end_x = point
         .x
-        .saturating_add((max_distance_mm * PIXELS_PER_MM).floor() as u32)
+        .saturating_add(max_distance_pixels)
         .min(image.width());
-    let start_y = point
-        .y
-        .saturating_sub((max_distance_mm * PIXELS_PER_MM).floor() as u32);
+    let start_y = point.y.saturating_sub(max_distance_pixels);
     let end_y = point
         .y
-        .saturating_add((max_distance_mm * PIXELS_PER_MM).floor() as u32)
+        .saturating_add(max_distance_pixels)
         .min(image.height());
     let mut closest_location = None;
     for other_y in start_y..end_y {
         for other_x in start_x..end_x {
             if image.get_pixel(other_x, other_y).0[0] == BLACK {
-                let distance = distance_pixels(
+                let distance = distance_mm(
                     point,
                     PixelPosition {
                         x: other_x,
@@ -174,9 +169,9 @@ fn closest_black_pixel(
     closest_location
 }
 
-fn distance_pixels(location1: PixelPosition, location2: PixelPosition) -> f32 {
-    let dx = (location1.x as f32 - location2.x as f32).abs();
-    let dy = (location1.y as f32 - location2.y as f32).abs();
+fn distance_mm(location1: PixelPosition, location2: PixelPosition) -> f32 {
+    let dx = (location1.x as f32 - location2.x as f32) / PIXELS_PER_MM;
+    let dy = (location1.y as f32 - location2.y as f32) / PIXELS_PER_MM;
     (dx * dx + dy * dy).sqrt()
 }
 
