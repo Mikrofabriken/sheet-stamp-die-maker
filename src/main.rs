@@ -1,5 +1,7 @@
 use std::f32::consts::PI;
+use std::path::PathBuf;
 
+use clap::Parser;
 use image::io::Reader as ImageReader;
 use image::{DynamicImage, ImageBuffer, Luma};
 
@@ -8,7 +10,17 @@ const BLACK: u16 = 0;
 const PIXELS_PER_MM: f32 = 10.0;
 const MAX_FADE_DISTANCE: u32 = 45;
 const SHEET_THICKNESS_PIXELS: u32 = 7;
-const PUNCH_OUT_THICKNESS_MM: f32 = 2.0;
+
+#[derive(clap::Parser, Debug)]
+struct Args {
+    /// Input image file to create stamp dies from. Should be black and white. White is where the sheet
+    /// will be stamped out.
+    input: PathBuf,
+
+    /// How many millimeters deep to punch out. The height difference between white and black. (Z distance)
+    #[arg(long)]
+    punch_out_depth: f32,
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 struct PixelPosition {
@@ -17,7 +29,9 @@ struct PixelPosition {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let img = ImageReader::open("../Paradise-rd.png")?.decode()?;
+    let args = Args::parse();
+
+    let img = ImageReader::open(&args.input)?.decode()?;
     let luma_img = img.into_luma16();
 
     let (width, height) = luma_img.dimensions();
@@ -79,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     let negative_z_mm = negative_form.get_pixel(negative_x, negative_y).0[0] as f32
                         / u16::MAX as f32
-                        * PUNCH_OUT_THICKNESS_MM;
+                        * args.punch_out_depth;
 
                     let hypotenuse_mm = SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM;
                     let required_z_diff_mm = ((hypotenuse_mm * hypotenuse_mm)
@@ -93,9 +107,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             positive_z_mm -= SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM;
             assert!(positive_z_mm >= 0.0);
-            assert!(positive_z_mm <= PUNCH_OUT_THICKNESS_MM);
-            let positive_pixel =
-                ((positive_z_mm / PUNCH_OUT_THICKNESS_MM) * u16::MAX as f32) as u16;
+            assert!(positive_z_mm <= args.punch_out_depth);
+            let positive_pixel = ((positive_z_mm / args.punch_out_depth) * u16::MAX as f32) as u16;
             positive_form.put_pixel(positive_x, positive_y, Luma([positive_pixel]));
         }
     }
