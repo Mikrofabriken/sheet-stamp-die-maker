@@ -8,7 +8,6 @@ use image::{DynamicImage, ImageBuffer, Luma};
 const BLACK: u16 = 0;
 
 const PIXELS_PER_MM: f32 = 10.0;
-const MAX_FADE_DISTANCE: u32 = 45;
 const SHEET_THICKNESS_PIXELS: u32 = 7;
 
 #[derive(clap::Parser, Debug)]
@@ -20,6 +19,11 @@ struct Args {
     /// How many millimeters deep to punch out. The height difference between white and black. (Z distance)
     #[arg(long)]
     punch_out_depth: f32,
+
+    /// Over how many millimeters in the XY plane (along the sheet) to do the transition from black to white.
+    /// A higher value provides a smoother curve for the sheet to bend along, but reduces details.
+    #[arg(long, default_value_t = 4.5)]
+    fade_distance: f32,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -51,9 +55,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 x: output_x,
                 y: output_y,
             };
-            let distance_to_black = closest_black_pixel(&luma_img, output_point, MAX_FADE_DISTANCE)
-                .unwrap_or(MAX_FADE_DISTANCE as f32);
-            let output_color = fade_fn(distance_to_black);
+            let output_color = if let Some(distance_to_black_pixels) =
+                closest_black_pixel(&luma_img, output_point, args.fade_distance)
+            {
+                let distance_to_black_mm = distance_to_black_pixels / PIXELS_PER_MM;
+                fade_fn(distance_to_black_mm, args.fade_distance)
+            } else {
+                u16::MAX
+            };
             negative_form.put_pixel(output_x, output_y, Luma([output_color]));
         }
     }
@@ -125,12 +134,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn closest_black_pixel(
     image: &ImageBuffer<Luma<u16>, Vec<u16>>,
     point: PixelPosition,
-    max_distance: u32,
+    max_distance_mm: f32,
 ) -> Option<f32> {
-    let start_x = point.x.saturating_sub(max_distance);
-    let end_x = point.x.saturating_add(max_distance).min(image.width());
-    let start_y = point.y.saturating_sub(max_distance);
-    let end_y = point.y.saturating_add(max_distance).min(image.height());
+    let start_x = point
+        .x
+        .saturating_sub((max_distance_mm * PIXELS_PER_MM).floor() as u32);
+    let end_x = point
+        .x
+        .saturating_add((max_distance_mm * PIXELS_PER_MM).floor() as u32)
+        .min(image.width());
+    let start_y = point
+        .y
+        .saturating_sub((max_distance_mm * PIXELS_PER_MM).floor() as u32);
+    let end_y = point
+        .y
+        .saturating_add((max_distance_mm * PIXELS_PER_MM).floor() as u32)
+        .min(image.height());
     let mut closest_location = None;
     for other_y in start_y..end_y {
         for other_x in start_x..end_x {
@@ -161,7 +180,10 @@ fn distance_pixels(location1: PixelPosition, location2: PixelPosition) -> f32 {
     (dx * dx + dy * dy).sqrt()
 }
 
-fn fade_fn(distance_to_black: f32) -> u16 {
-    let angle = (distance_to_black.min(MAX_FADE_DISTANCE as f32) / MAX_FADE_DISTANCE as f32) * PI;
+fn fade_fn(distance_to_black_mm: f32, fade_distance_mm: f32) -> u16 {
+    if distance_to_black_mm > fade_distance_mm {
+        return u16::MAX;
+    }
+    let angle = (distance_to_black_mm / fade_distance_mm as f32) * PI;
     (((angle + PI).cos() + 1.0) / 2.0 * u16::MAX as f32) as u16
 }
