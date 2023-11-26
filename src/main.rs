@@ -1,5 +1,5 @@
 use std::f32::consts::PI;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use image::io::Reader as ImageReader;
@@ -119,13 +119,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             positive_form.put_pixel(positive_x, positive_y, Luma([positive_pixel]));
         }
     }
+    let negative_output_path =
+        output_path(&args.input, "negative").expect("Unable to convert input path to output path");
     let negative_form = DynamicImage::from(negative_form).fliph();
-    negative_form.save_with_format("../paradise-rd-negative.png", image::ImageFormat::Png)?;
+    negative_form.save_with_format(negative_output_path, image::ImageFormat::Png)?;
+
+    let positive_output_path =
+        output_path(&args.input, "positive").expect("Unable to convert input path to output path");
     let mut positive_form = DynamicImage::from(positive_form);
     positive_form.invert();
-    positive_form.save_with_format("../paradise-rd-positive.png", image::ImageFormat::Png)?;
+    positive_form.save_with_format(positive_output_path, image::ImageFormat::Png)?;
 
     Ok(())
+}
+
+fn output_path(input_path: &Path, form_type: &str) -> Option<PathBuf> {
+    let dir = input_path.parent()?;
+    let mut filename = input_path.file_stem()?.to_owned();
+    filename.push(format!(".{form_type}.png"));
+    Some(dir.join(filename))
 }
 
 /// Returns the distance (in mm) from `coordinate` to the closest pixel that is black, in `image`. Only searches the `max_distance` closest pixels
