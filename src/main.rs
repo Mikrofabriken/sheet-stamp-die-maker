@@ -27,7 +27,7 @@ struct Args {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-struct PixelPosition {
+struct PixelCoordinate {
     pub x: u32,
     pub y: u32,
 }
@@ -51,12 +51,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{percentage}%");
         }
         for output_x in 0..width {
-            let output_point = PixelPosition {
+            let output_coordinate = PixelCoordinate {
                 x: output_x,
                 y: output_y,
             };
             let output_color = if let Some(distance_to_black_mm) =
-                closest_black_pixel(&luma_img, output_point, args.fade_distance)
+                closest_black_pixel(&luma_img, output_coordinate, args.fade_distance)
             {
                 fade_fn(distance_to_black_mm, args.fade_distance)
             } else {
@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{percentage}%");
         }
         for positive_x in 0..width {
-            let positive_point = PixelPosition {
+            let positive_coordinate = PixelCoordinate {
                 x: positive_x,
                 y: positive_y,
             };
@@ -90,11 +90,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut positive_z_mm = 0.0;
             for negative_y in start_y..end_y {
                 for negative_x in start_x..end_x {
-                    let negative_point = PixelPosition {
+                    let negative_coordinate = PixelCoordinate {
                         x: negative_x,
                         y: negative_y,
                     };
-                    let xy_distance_mm = distance_mm(positive_point, negative_point);
+                    let xy_distance_mm = distance_mm(positive_coordinate, negative_coordinate);
                     if xy_distance_mm > SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM {
                         continue;
                     }
@@ -128,20 +128,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Returns the distance (in mm) from `point` to the closest pixel that is black, in `image`. Only searches the `max_distance` closest pixels
+/// Returns the distance (in mm) from `coordinate` to the closest pixel that is black, in `image`. Only searches the `max_distance` closest pixels
 fn closest_black_pixel(
     image: &ImageBuffer<Luma<u16>, Vec<u16>>,
-    point: PixelPosition,
+    coordinate: PixelCoordinate,
     max_distance_mm: f32,
 ) -> Option<f32> {
     let max_distance_pixels = (max_distance_mm * PIXELS_PER_MM).floor() as u32;
-    let start_x = point.x.saturating_sub(max_distance_pixels);
-    let end_x = point
+    let start_x = coordinate.x.saturating_sub(max_distance_pixels);
+    let end_x = coordinate
         .x
         .saturating_add(max_distance_pixels)
         .min(image.width());
-    let start_y = point.y.saturating_sub(max_distance_pixels);
-    let end_y = point
+    let start_y = coordinate.y.saturating_sub(max_distance_pixels);
+    let end_y = coordinate
         .y
         .saturating_add(max_distance_pixels)
         .min(image.height());
@@ -150,8 +150,8 @@ fn closest_black_pixel(
         for other_x in start_x..end_x {
             if image.get_pixel(other_x, other_y).0[0] == BLACK {
                 let distance = distance_mm(
-                    point,
-                    PixelPosition {
+                    coordinate,
+                    PixelCoordinate {
                         x: other_x,
                         y: other_y,
                     },
@@ -169,7 +169,7 @@ fn closest_black_pixel(
     closest_location
 }
 
-fn distance_mm(location1: PixelPosition, location2: PixelPosition) -> f32 {
+fn distance_mm(location1: PixelCoordinate, location2: PixelCoordinate) -> f32 {
     let dx = (location1.x as f32 - location2.x as f32) / PIXELS_PER_MM;
     let dy = (location1.y as f32 - location2.y as f32) / PIXELS_PER_MM;
     (dx * dx + dy * dy).sqrt()
