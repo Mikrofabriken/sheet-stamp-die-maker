@@ -5,10 +5,11 @@ use clap::Parser;
 use image::io::Reader as ImageReader;
 use image::{DynamicImage, ImageBuffer, Luma};
 
+mod neighbor_iterator;
+
 const BLACK: u16 = 0;
 
 const PIXELS_PER_MM: f32 = 10.0;
-const SHEET_THICKNESS_PIXELS: u32 = 7;
 
 #[derive(clap::Parser, Debug)]
 struct Args {
@@ -19,6 +20,11 @@ struct Args {
     /// How many millimeters deep to punch out. The height difference between white and black. (Z distance)
     #[arg(long)]
     punch_out_depth: f32,
+
+    /// How thick the sheet to stamp is (in millimeters).
+    /// Determines the  distance between the positive and negative forms.
+    #[arg(long, default_value_t = 0.7)]
+    sheet_thickness: f32,
 
     /// Over how many millimeters in the XY plane (along the sheet) to do the transition from black to white.
     /// A higher value provides a smoother curve for the sheet to bend along, but reduces details.
@@ -67,6 +73,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut positive_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
+    let sheet_thickness_neighbors =
+        neighbor_iterator::Neighbors::new(args.sheet_thickness * PIXELS_PER_MM);
 
     last_reported_percentage = 0;
     for positive_y in 0..height {
@@ -76,43 +84,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{percentage}%");
         }
         for positive_x in 0..width {
-            let positive_coordinate = PixelCoordinate {
-                x: positive_x,
-                y: positive_y,
-            };
-            let start_x = positive_x.saturating_sub(SHEET_THICKNESS_PIXELS);
-            let end_x = positive_x.saturating_add(SHEET_THICKNESS_PIXELS).min(width);
-            let start_y = positive_y.saturating_sub(SHEET_THICKNESS_PIXELS);
-            let end_y = positive_y
-                .saturating_add(SHEET_THICKNESS_PIXELS)
-                .min(height);
-
             let mut positive_z_mm = 0.0;
-            for negative_y in start_y..end_y {
-                for negative_x in start_x..end_x {
-                    let negative_coordinate = PixelCoordinate {
-                        x: negative_x,
-                        y: negative_y,
-                    };
-                    let xy_distance_mm = distance_mm(positive_coordinate, negative_coordinate);
-                    if xy_distance_mm > SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM {
-                        continue;
-                    }
-                    let negative_z_mm = negative_form.get_pixel(negative_x, negative_y).0[0] as f32
-                        / u16::MAX as f32
-                        * args.punch_out_depth;
+            for (offset, distance_pixels) in &sheet_thickness_neighbors {
+                let negative_y = positive_y as i32 + offset.y;
+                let negative_x = positive_x as i32 + offset.x;
+                // Skip pixels outside the image
+                if negative_y < 0
+                    || negative_y >= height as i32
+                    || negative_x < 0
+                    || negative_x >= width as i32
+                {
+                    continue;
+                }
 
-                    let hypotenuse_mm = SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM;
-                    let required_z_diff_mm = ((hypotenuse_mm * hypotenuse_mm)
-                        - (xy_distance_mm * xy_distance_mm))
-                        .sqrt();
-                    let required_z = negative_z_mm + required_z_diff_mm;
-                    if required_z > positive_z_mm {
-                        positive_z_mm = required_z;
-                    }
+                // Safe to cast to u32 since we check for <0 above
+                let negative_coordinate = PixelCoordinate {
+                    x: negative_x as u32,
+                    y: negative_y as u32,
+                };
+                let xy_distance_mm = distance_pixels / PIXELS_PER_MM;
+                let negative_z_mm = negative_form
+                    .get_pixel(negative_coordinate.x, negative_coordinate.y)
+                    .0[0] as f32
+                    / u16::MAX as f32
+                    * args.punch_out_depth;
+
+                // Compute the missing side of the triangle. The sheet thickness is the hypotenuse
+                // and the positive to negative xy-distance is one known side.
+                let required_z_diff_mm =
+                    ((args.sheet_thickness * args.sheet_thickness) - (xy_distance_mm * xy_distance_mm)).sqrt();
+                let required_z = negative_z_mm + required_z_diff_mm;
+                // Bump up positive_z_mm if required_z is higher than currently held value
+                if required_z > positive_z_mm {
+                    positive_z_mm = required_z;
                 }
             }
-            positive_z_mm -= SHEET_THICKNESS_PIXELS as f32 / PIXELS_PER_MM;
+            positive_z_mm -= args.sheet_thickness;
             assert!(positive_z_mm >= 0.0);
             assert!(positive_z_mm <= args.punch_out_depth);
             let positive_pixel = ((positive_z_mm / args.punch_out_depth) * u16::MAX as f32) as u16;
