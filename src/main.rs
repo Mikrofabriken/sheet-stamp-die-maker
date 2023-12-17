@@ -119,12 +119,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Compute the missing side of the triangle. The sheet thickness is the hypotenuse
                 // and the positive to negative xy-distance is one known side.
-                let required_z_diff_mm =
-                    ((args.sheet_thickness * args.sheet_thickness) - (xy_distance_mm * xy_distance_mm)).sqrt();
+                let required_z_diff_mm = ((args.sheet_thickness * args.sheet_thickness)
+                    - (xy_distance_mm * xy_distance_mm))
+                    .sqrt();
                 let required_z = negative_z_mm + required_z_diff_mm;
                 // Bump up positive_z_mm if required_z is higher than currently held value
                 if required_z > positive_z_mm {
                     positive_z_mm = required_z;
+                }
+                // Abort early if we are already so high up that subsequent pixels can't push us higher.
+                // We can do this optimization since we know that `positive_z_mm` will only ever increase
+                // and `required_z_diff_mm` will only shrink towards zero.
+                if positive_z_mm > args.punch_out_depth + required_z_diff_mm {
+                    break;
                 }
             }
             positive_z_mm -= args.sheet_thickness;
