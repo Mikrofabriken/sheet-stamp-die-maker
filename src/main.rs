@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use image::io::Reader as ImageReader;
-use image::{DynamicImage, ImageBuffer, Luma};
+use image::{ImageBuffer, Luma};
 
 mod neighbor_iterator;
 
@@ -105,8 +105,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let positive_output_path =
         output_path(&args.input, "positive").expect("Unable to convert input path to output path");
-    let mut positive_form = DynamicImage::from(positive_form);
-    positive_form.invert();
     positive_form.save_with_format(positive_output_path, image::ImageFormat::Png)?;
 
     Ok(())
@@ -171,7 +169,9 @@ fn compute_positive_form(
             let mut positive_z_mm = 0.0;
             for (offset, distance_pixels) in &sheet_thickness_neighbors {
                 let negative_y = positive_y as i32 + offset.y;
-                let negative_x = positive_x as i32 + offset.x;
+                // Since the negative form is horizontally flipped we have to read the negative
+                // form from right to left.
+                let negative_x = width as i32 - 1 - (positive_x as i32 + offset.x);
                 // Skip pixels outside the image
                 if negative_y < 0
                     || negative_y >= height as i32
@@ -181,16 +181,9 @@ fn compute_positive_form(
                     continue;
                 }
 
-                // Coordinate to read from the negative_form to compute the required height for our positive
-                // coordinate we are currently on. Since the negative form is flipped horizontally we need
-                // to reverse that by reading it from right to left.
-                let negative_coordinate = PixelCoordinate {
-                    x: width - 1 - negative_x as u32,
-                    y: negative_y as u32,
-                };
                 let xy_distance_mm = distance_pixels / pixels_per_mm;
                 let negative_z_mm = negative_form
-                    .get_pixel(negative_coordinate.x, negative_coordinate.y)
+                    .get_pixel(negative_x as u32, negative_y as u32)
                     .0[0] as f32
                     / u16::MAX as f32
                     * punch_out_depth;
@@ -215,7 +208,8 @@ fn compute_positive_form(
             positive_z_mm -= sheet_thickness;
             assert!(positive_z_mm >= 0.0);
             assert!(positive_z_mm <= punch_out_depth);
-            let positive_pixel = ((positive_z_mm / punch_out_depth) * u16::MAX as f32) as u16;
+            let positive_pixel =
+                u16::MAX - ((positive_z_mm / punch_out_depth) * u16::MAX as f32) as u16;
             positive_form.put_pixel(positive_x, positive_y, Luma([positive_pixel]));
         }
     }
