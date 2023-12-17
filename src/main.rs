@@ -18,7 +18,7 @@ struct Args {
     input: PathBuf,
 
     /// How many millimeters deep to punch out. The height difference between white and black. (Z distance)
-    #[arg(long)]
+    #[arg(long, default_value_t = 2.5)]
     punch_out_depth: f32,
 
     /// How thick the sheet to stamp is (in millimeters).
