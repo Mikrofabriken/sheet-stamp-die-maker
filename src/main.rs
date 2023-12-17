@@ -1,5 +1,6 @@
 use std::f32::consts::PI;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::time::Instant;
 
 use clap::Parser;
@@ -12,7 +13,7 @@ const BLACK: u16 = 0;
 
 #[derive(clap::Parser, Debug)]
 struct Args {
-    /// Input image file to create stamp dies from. Should be black and white. White is where the sheet
+    /// Input image file to create stamp dies from. Should be black and white. Black is where the sheet
     /// will be stamped out.
     input: PathBuf,
 
@@ -21,7 +22,7 @@ struct Args {
     punch_out_depth: f32,
 
     /// How thick the sheet to stamp is (in millimeters).
-    /// Determines the  distance between the positive and negative forms.
+    /// Determines the distance between the positive and negative forms.
     #[arg(long, default_value_t = 0.7)]
     sheet_thickness: f32,
 
@@ -36,6 +37,35 @@ struct Args {
     pixels_per_mm: f32,
 }
 
+/// Parses the command line arguments and check that they are sane. Prints an error
+/// and exits with non-zero exit code if not.
+fn parse_args() -> Args {
+    let args = Args::parse();
+
+    if !args.input.exists() {
+        eprintln!("Input {}, does not exist", args.input.display());
+        process::exit(1);
+    }
+    if !args.punch_out_depth.is_normal() {
+        eprintln!("Invalid value for punch out depth. Has to be positive");
+        process::exit(1);
+    }
+    if !args.sheet_thickness.is_normal() {
+        eprintln!("Invalid value for sheet thickness. Has to be positive");
+        process::exit(1);
+    }
+    if !args.fade_distance.is_normal() {
+        eprintln!("Invalid value for fade distance. Has to be positive");
+        process::exit(1);
+    }
+    if !args.pixels_per_mm.is_normal() {
+        eprintln!("Invalid value for pixels per mm. Has to be positive");
+        process::exit(1);
+    }
+
+    args
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 struct PixelCoordinate {
     pub x: u32,
@@ -43,7 +73,7 @@ struct PixelCoordinate {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
+    let args = parse_args();
 
     let img = ImageReader::open(&args.input)?.decode()?;
     let luma_img = img.into_luma16();
