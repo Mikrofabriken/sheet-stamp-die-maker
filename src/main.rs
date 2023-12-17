@@ -10,8 +10,6 @@ mod neighbor_iterator;
 
 const BLACK: u16 = 0;
 
-const PIXELS_PER_MM: f32 = 10.0;
-
 #[derive(clap::Parser, Debug)]
 struct Args {
     /// Input image file to create stamp dies from. Should be black and white. White is where the sheet
@@ -31,6 +29,11 @@ struct Args {
     /// A higher value provides a smoother curve for the sheet to bend along, but reduces details.
     #[arg(long, default_value_t = 4.5)]
     fade_distance: f32,
+
+    /// Resolution of the input image. Needed to convert between pixel coordinates and real world distance.
+    /// The default value of 0.1 mm per pixel gives enough resolution for most practical use cases.
+    #[arg(long, default_value_t = 10.0)]
+    pixels_per_mm: f32,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -63,9 +66,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 x: output_x,
                 y: output_y,
             };
-            let output_color = if let Some(distance_to_black_mm) =
-                closest_black_pixel(&luma_img, output_coordinate, args.fade_distance)
-            {
+            let output_color = if let Some(distance_to_black_mm) = closest_black_pixel(
+                &luma_img,
+                output_coordinate,
+                args.fade_distance,
+                args.pixels_per_mm,
+            ) {
                 fade_fn(distance_to_black_mm, args.fade_distance)
             } else {
                 u16::MAX
@@ -82,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut positive_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
     let positive_form_start = Instant::now();
     let sheet_thickness_neighbors =
-        neighbor_iterator::Neighbors::new(args.sheet_thickness * PIXELS_PER_MM);
+        neighbor_iterator::Neighbors::new(args.sheet_thickness * args.pixels_per_mm);
 
     last_reported_percentage = 0;
     for positive_y in 0..height {
@@ -110,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     x: negative_x as u32,
                     y: negative_y as u32,
                 };
-                let xy_distance_mm = distance_pixels / PIXELS_PER_MM;
+                let xy_distance_mm = distance_pixels / args.pixels_per_mm;
                 let negative_z_mm = negative_form
                     .get_pixel(negative_coordinate.x, negative_coordinate.y)
                     .0[0] as f32
@@ -173,8 +179,9 @@ fn closest_black_pixel(
     image: &ImageBuffer<Luma<u16>, Vec<u16>>,
     coordinate: PixelCoordinate,
     max_distance_mm: f32,
+    pixels_per_mm: f32,
 ) -> Option<f32> {
-    let max_distance_pixels = (max_distance_mm * PIXELS_PER_MM).floor() as u32;
+    let max_distance_pixels = (max_distance_mm * pixels_per_mm).floor() as u32;
     let start_x = coordinate.x.saturating_sub(max_distance_pixels);
     let end_x = coordinate
         .x
@@ -195,6 +202,7 @@ fn closest_black_pixel(
                         x: other_x,
                         y: other_y,
                     },
+                    pixels_per_mm,
                 );
                 if let Some(closest_location) = closest_location.as_mut() {
                     if distance < *closest_location {
@@ -209,9 +217,9 @@ fn closest_black_pixel(
     closest_location
 }
 
-fn distance_mm(location1: PixelCoordinate, location2: PixelCoordinate) -> f32 {
-    let dx = (location1.x as f32 - location2.x as f32) / PIXELS_PER_MM;
-    let dy = (location1.y as f32 - location2.y as f32) / PIXELS_PER_MM;
+fn distance_mm(location1: PixelCoordinate, location2: PixelCoordinate, pixels_per_mm: f32) -> f32 {
+    let dx = (location1.x as f32 - location2.x as f32) / pixels_per_mm;
+    let dy = (location1.y as f32 - location2.y as f32) / pixels_per_mm;
     (dx * dx + dy * dy).sqrt()
 }
 
