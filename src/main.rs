@@ -81,78 +81,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hello, world! {width}x{height}");
 
     let negative_form_start = Instant::now();
-    let negative_form = compute_negative_form(input, args.fade_distance, args.pixels_per_mm);
+    let negative_form = compute_negative_form(&input, args.fade_distance, args.pixels_per_mm);
     println!(
         "Computing negative form took {} ms",
         negative_form_start.elapsed().as_millis()
     );
 
-    let mut positive_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
     let positive_form_start = Instant::now();
-    let sheet_thickness_neighbors =
-        neighbor_iterator::Neighbors::new(args.sheet_thickness * args.pixels_per_mm);
-
-    let mut last_reported_percentage = 0;
-    for positive_y in 0..height {
-        let percentage = (positive_y as f32 / height as f32 * 100.0).floor() as u32;
-        if percentage > last_reported_percentage {
-            last_reported_percentage = percentage;
-            println!("{percentage}%");
-        }
-        for positive_x in 0..width {
-            let mut positive_z_mm = 0.0;
-            for (offset, distance_pixels) in &sheet_thickness_neighbors {
-                let negative_y = positive_y as i32 + offset.y;
-                let negative_x = positive_x as i32 + offset.x;
-                // Skip pixels outside the image
-                if negative_y < 0
-                    || negative_y >= height as i32
-                    || negative_x < 0
-                    || negative_x >= width as i32
-                {
-                    continue;
-                }
-
-                // Safe to cast to u32 since we check for <0 above
-                let negative_coordinate = PixelCoordinate {
-                    x: negative_x as u32,
-                    y: negative_y as u32,
-                };
-                let xy_distance_mm = distance_pixels / args.pixels_per_mm;
-                let negative_z_mm = negative_form
-                    .get_pixel(negative_coordinate.x, negative_coordinate.y)
-                    .0[0] as f32
-                    / u16::MAX as f32
-                    * args.punch_out_depth;
-
-                // Compute the missing side of the triangle. The sheet thickness is the hypotenuse
-                // and the positive to negative xy-distance is one known side.
-                let required_z_diff_mm = ((args.sheet_thickness * args.sheet_thickness)
-                    - (xy_distance_mm * xy_distance_mm))
-                    .sqrt();
-                let required_z = negative_z_mm + required_z_diff_mm;
-                // Bump up positive_z_mm if required_z is higher than currently held value
-                if required_z > positive_z_mm {
-                    positive_z_mm = required_z;
-                }
-                // Abort early if we are already so high up that subsequent pixels can't push us higher.
-                // We can do this optimization since we know that `positive_z_mm` will only ever increase
-                // and `required_z_diff_mm` will only shrink towards zero.
-                if positive_z_mm > args.punch_out_depth + required_z_diff_mm {
-                    break;
-                }
-            }
-            positive_z_mm -= args.sheet_thickness;
-            assert!(positive_z_mm >= 0.0);
-            assert!(positive_z_mm <= args.punch_out_depth);
-            let positive_pixel = ((positive_z_mm / args.punch_out_depth) * u16::MAX as f32) as u16;
-            positive_form.put_pixel(positive_x, positive_y, Luma([positive_pixel]));
-        }
-    }
-    let positive_form_compute_time = positive_form_start.elapsed();
+    let positive_form = compute_positive_form(
+        &negative_form,
+        args.punch_out_depth,
+        args.sheet_thickness,
+        args.pixels_per_mm,
+    );
     println!(
         "Computing positive form took {} ms",
-        positive_form_compute_time.as_millis()
+        positive_form_start.elapsed().as_millis()
     );
 
     let negative_output_path =
@@ -170,7 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Computes and returns the image buffer for the negative form.
 fn compute_negative_form(
-    input: ImageBuffer<Luma<u16>, Vec<u16>>,
+    input: &ImageBuffer<Luma<u16>, Vec<u16>>,
     fade_distance: f32,
     pixels_per_mm: f32,
 ) -> ImageBuffer<Luma<u16>, Vec<u16>> {
@@ -202,6 +146,81 @@ fn compute_negative_form(
     }
 
     negative_form
+}
+
+fn compute_positive_form(
+    negative_form: &ImageBuffer<Luma<u16>, Vec<u16>>,
+    punch_out_depth: f32,
+    sheet_thickness: f32,
+    pixels_per_mm: f32,
+) -> ImageBuffer<Luma<u16>, Vec<u16>> {
+    let (width, height) = negative_form.dimensions();
+    let mut positive_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
+
+    let sheet_thickness_neighbors =
+        neighbor_iterator::Neighbors::new(sheet_thickness * pixels_per_mm);
+
+    let mut last_reported_percentage = 0;
+    for positive_y in 0..height {
+        let percentage = (positive_y as f32 / height as f32 * 100.0).floor() as u32;
+        if percentage > last_reported_percentage {
+            last_reported_percentage = percentage;
+            println!("{percentage}%");
+        }
+        for positive_x in 0..width {
+            let mut positive_z_mm = 0.0;
+            for (offset, distance_pixels) in &sheet_thickness_neighbors {
+                let negative_y = positive_y as i32 + offset.y;
+                let negative_x = positive_x as i32 + offset.x;
+                // Skip pixels outside the image
+                if negative_y < 0
+                    || negative_y >= height as i32
+                    || negative_x < 0
+                    || negative_x >= width as i32
+                {
+                    continue;
+                }
+
+                // Coordinate to read from the negative_form to compute the required height for our positive
+                // coordinate we are currently on. Since the negative form is flipped horizontally we need
+                // to reverse that by reading it from right to left.
+                let negative_coordinate = PixelCoordinate {
+                    x: width - 1 - negative_x as u32,
+                    y: negative_y as u32,
+                };
+                let xy_distance_mm = distance_pixels / pixels_per_mm;
+                let negative_z_mm = negative_form
+                    .get_pixel(negative_coordinate.x, negative_coordinate.y)
+                    .0[0] as f32
+                    / u16::MAX as f32
+                    * punch_out_depth;
+
+                // Compute the missing side of the triangle. The sheet thickness is the hypotenuse
+                // and the positive to negative xy-distance is one known side.
+                let required_z_diff_mm = ((sheet_thickness * sheet_thickness)
+                    - (xy_distance_mm * xy_distance_mm))
+                    .sqrt();
+                let required_z = negative_z_mm + required_z_diff_mm;
+                // Bump up positive_z_mm if required_z is higher than currently held value
+                if required_z > positive_z_mm {
+                    positive_z_mm = required_z;
+                }
+                // Abort early if we are already so high up that subsequent pixels can't push us higher.
+                // We can do this optimization since we know that `positive_z_mm` will only ever increase
+                // and `required_z_diff_mm` will only shrink towards zero.
+                if positive_z_mm > punch_out_depth + required_z_diff_mm {
+                    break;
+                }
+            }
+            positive_z_mm -= sheet_thickness;
+            assert!(positive_z_mm >= 0.0);
+            assert!(positive_z_mm <= punch_out_depth);
+            let positive_pixel = ((positive_z_mm / punch_out_depth) * u16::MAX as f32) as u16;
+            positive_form.put_pixel(positive_x, positive_y, Luma([positive_pixel]));
+        }
+    }
+
+    positive_form
 }
 
 fn output_path(input_path: &Path, form_type: &str) -> Option<PathBuf> {
