@@ -75,44 +75,16 @@ struct PixelCoordinate {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args();
 
-    let img = ImageReader::open(&args.input)?.decode()?;
-    let luma_img = img.into_luma16();
+    let input = ImageReader::open(&args.input)?.decode()?.into_luma16();
 
-    let (width, height) = luma_img.dimensions();
+    let (width, height) = input.dimensions();
     println!("Hello, world! {width}x{height}");
 
-    let mut negative_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
-
     let negative_form_start = Instant::now();
-    let mut last_reported_percentage = 0;
-    for output_y in 0..height {
-        let percentage = (output_y as f32 / height as f32 * 100.0).floor() as u32;
-        if percentage > last_reported_percentage {
-            last_reported_percentage = percentage;
-            println!("{percentage}%");
-        }
-        for output_x in 0..width {
-            let output_coordinate = PixelCoordinate {
-                x: output_x,
-                y: output_y,
-            };
-            let output_color = if let Some(distance_to_black_mm) = closest_black_pixel(
-                &luma_img,
-                output_coordinate,
-                args.fade_distance,
-                args.pixels_per_mm,
-            ) {
-                fade_fn(distance_to_black_mm, args.fade_distance)
-            } else {
-                u16::MAX
-            };
-            negative_form.put_pixel(output_x, output_y, Luma([output_color]));
-        }
-    }
-    let negative_form_compute_time = negative_form_start.elapsed();
+    let negative_form = compute_negative_form(input, args.fade_distance, args.pixels_per_mm);
     println!(
         "Computing negative form took {} ms",
-        negative_form_compute_time.as_millis()
+        negative_form_start.elapsed().as_millis()
     );
 
     let mut positive_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
@@ -120,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sheet_thickness_neighbors =
         neighbor_iterator::Neighbors::new(args.sheet_thickness * args.pixels_per_mm);
 
-    last_reported_percentage = 0;
+    let mut last_reported_percentage = 0;
     for positive_y in 0..height {
         let percentage = (positive_y as f32 / height as f32 * 100.0).floor() as u32;
         if percentage > last_reported_percentage {
@@ -185,7 +157,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let negative_output_path =
         output_path(&args.input, "negative").expect("Unable to convert input path to output path");
-    let negative_form = DynamicImage::from(negative_form).fliph();
     negative_form.save_with_format(negative_output_path, image::ImageFormat::Png)?;
 
     let positive_output_path =
@@ -195,6 +166,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     positive_form.save_with_format(positive_output_path, image::ImageFormat::Png)?;
 
     Ok(())
+}
+
+/// Computes and returns the image buffer for the negative form.
+fn compute_negative_form(
+    input: ImageBuffer<Luma<u16>, Vec<u16>>,
+    fade_distance: f32,
+    pixels_per_mm: f32,
+) -> ImageBuffer<Luma<u16>, Vec<u16>> {
+    let (width, height) = input.dimensions();
+    let mut negative_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
+
+    let mut last_reported_percentage = 0;
+    for output_y in 0..height {
+        let percentage = (output_y as f32 / height as f32 * 100.0).floor() as u32;
+        if percentage > last_reported_percentage {
+            last_reported_percentage = percentage;
+            println!("{percentage}%");
+        }
+        for output_x in 0..width {
+            // The negative form should be flipped horizontally to be correct.
+            let input_coordinate = PixelCoordinate {
+                x: width - 1 - output_x,
+                y: output_y,
+            };
+            let output_color = if let Some(distance_to_black_mm) =
+                closest_black_pixel(&input, input_coordinate, fade_distance, pixels_per_mm)
+            {
+                fade_fn(distance_to_black_mm, fade_distance)
+            } else {
+                u16::MAX
+            };
+            negative_form.put_pixel(output_x, output_y, Luma([output_color]));
+        }
+    }
+
+    negative_form
 }
 
 fn output_path(input_path: &Path, form_type: &str) -> Option<PathBuf> {
