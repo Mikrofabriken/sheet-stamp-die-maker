@@ -1,5 +1,6 @@
 use std::f32::consts::PI;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use clap::Parser;
 use image::io::Reader as ImageReader;
@@ -49,6 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut negative_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
 
+    let negative_form_start = Instant::now();
     let mut last_reported_percentage = 0;
     for output_y in 0..height {
         let percentage = (output_y as f32 / height as f32 * 100.0).floor() as u32;
@@ -71,8 +73,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             negative_form.put_pixel(output_x, output_y, Luma([output_color]));
         }
     }
+    let negative_form_compute_time = negative_form_start.elapsed();
+    println!(
+        "Computing negative form took {} ms",
+        negative_form_compute_time.as_millis()
+    );
 
     let mut positive_form: ImageBuffer<Luma<u16>, Vec<_>> = ImageBuffer::new(width, height);
+    let positive_form_start = Instant::now();
     let sheet_thickness_neighbors =
         neighbor_iterator::Neighbors::new(args.sheet_thickness * PIXELS_PER_MM);
 
@@ -126,6 +134,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             positive_form.put_pixel(positive_x, positive_y, Luma([positive_pixel]));
         }
     }
+    let positive_form_compute_time = positive_form_start.elapsed();
+    println!(
+        "Computing positive form took {} ms",
+        positive_form_compute_time.as_millis()
+    );
+
     let negative_output_path =
         output_path(&args.input, "negative").expect("Unable to convert input path to output path");
     let negative_form = DynamicImage::from(negative_form).fliph();
